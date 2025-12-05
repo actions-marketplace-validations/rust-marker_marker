@@ -1,11 +1,11 @@
 use marker_api::{
     ast::{
-        self, AdtKind, AssocItemKind, Body, CommonItemData, CommonPatData, ConstItem, EnumItem, EnumVariant,
-        ExternBlockItem, ExternCrateItem, ExternItemKind, FnItem, FnParam, IdentPat, ImplItem, ItemField, ItemKind,
-        ModItem, PatKind, StaticItem, StructItem, TraitItem, TyAliasItem, UnionItem, UnstableItem, UseItem, UseKind,
-        Visibility,
+        AdtKind, AssocItemKind, Body, CommonItemData, CommonPatData, ConstItem, EnumItem, EnumVariant, ExternBlockItem,
+        ExternCrateItem, ExternItemKind, FnItem, FnParam, IdentPat, ImplItem, ItemField, ItemKind, ModItem, PatKind,
+        StaticItem, StructItem, TraitItem, TyAliasItem, UnionItem, UnstableItem, UseItem, UseKind, Visibility,
     },
     common::{Abi, Constness, Mutability, Safety, Syncness},
+    prelude::*,
     CtorBlocker,
 };
 use rustc_hir as hir;
@@ -41,8 +41,17 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
             return Some(*item);
         }
 
+        if self.is_compiler_generated(rustc_item.span) {
+            return None;
+        }
+
         let ident = self.to_ident(rustc_item.ident);
-        let data = CommonItemData::new(id, self.to_span_id(rustc_item.span), ident);
+        let data = CommonItemData::builder()
+            .id(id)
+            .span(self.to_span_id(rustc_item.span))
+            .vis(self.to_visibility(rustc_item.owner_id.def_id, rustc_item.vis_span))
+            .ident(ident)
+            .build();
         let item =
             match &rustc_item.kind {
                 hir::ItemKind::ExternCrate(original_name) => ItemKind::ExternCrate(self.alloc({
@@ -82,9 +91,14 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
                         hir::TraitFn::Provided(*body_id),
                     )))
                 },
-                hir::ItemKind::Mod(rustc_mod) => {
-                    ItemKind::Mod(self.alloc(ModItem::new(data, self.to_items(rustc_mod.item_ids))))
-                },
+                hir::ItemKind::Mod(rustc_mod) => ItemKind::Mod(
+                    self.alloc(
+                        ModItem::builder()
+                            .data(data)
+                            .items(self.to_items(rustc_mod.item_ids))
+                            .build(),
+                    ),
+                ),
                 hir::ItemKind::ForeignMod { abi, items } => ItemKind::ExternBlock(self.alloc({
                     let abi = self.to_abi(*abi);
                     ExternBlockItem::new(data, abi, self.to_external_items(items, abi))
@@ -159,6 +173,21 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
         Some(item)
     }
 
+    fn is_compiler_generated(&self, span: rustc_span::Span) -> bool {
+        let ctxt = span.ctxt();
+
+        !ctxt.is_root() && matches!(ctxt.outer_expn_data().kind, rustc_span::ExpnKind::AstPass(_))
+    }
+
+    fn to_visibility(&self, owner_id: hir::def_id::LocalDefId, vis_span: rustc_span::Span) -> Visibility<'ast> {
+        let span = (!vis_span.is_empty()).then(|| self.to_span_id(vis_span));
+
+        Visibility::builder()
+            .span(span)
+            .sem(self.to_sem_visibility(owner_id, span.is_some()))
+            .build()
+    }
+
     fn to_fn_item(
         &self,
         data: CommonItemData<'ast>,
@@ -175,12 +204,14 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
         let header = fn_sig.header;
         let return_ty = if let hir::FnRetTy::Return(rust_ty) = fn_sig.decl.output {
             // Unwrap `impl Future<Output = <ty>>` for async
-            if let hir::IsAsync::Async = header.asyncness
+            if let hir::IsAsync::Async(_) = header.asyncness
                 && let hir::TyKind::OpaqueDef(item_id, _bounds, _) = rust_ty.kind
                 && let item = self.rustc_cx.hir().item(item_id)
                 && let hir::ItemKind::OpaqueTy(opty) = &item.kind
-                && let [output_bound] = opty.bounds
-                && let hir::GenericBound::LangItemTrait(_lang_item, _span, _hir_id, rustc_args) = output_bound
+                && let [hir::GenericBound::Trait(trait_ref, _)] = opty.bounds
+                && let Some(hir::PathSegment {
+                    args: Some(rustc_args), ..
+                }) = trait_ref.trait_ref.path.segments.last()
                 && let [output_bound] = rustc_args.bindings
             {
                 Some(self.to_syn_ty(output_bound.ty()))
@@ -237,7 +268,7 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
 
     fn to_adt_kind(&self, var_data: &'tcx hir::VariantData) -> AdtKind<'ast> {
         match var_data {
-            hir::VariantData::Struct(fields, _recovered) => AdtKind::Field(self.to_fields(fields).into()),
+            hir::VariantData::Struct { fields, recovered: _ } => AdtKind::Field(self.to_fields(fields).into()),
             hir::VariantData::Tuple(fields, ..) => AdtKind::Tuple(self.to_fields(fields).into()),
             hir::VariantData::Unit(..) => AdtKind::Unit,
         }
@@ -245,11 +276,9 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
 
     fn to_fields(&self, fields: &'tcx [hir::FieldDef]) -> &'ast [ItemField<'ast>] {
         let fields = self.alloc_slice(fields.iter().map(|field| {
-            // FIXME update Visibility creation to use the stored local def id inside the
-            // field after the next sync. See #55
             ItemField::new(
                 self.to_field_id(field.hir_id),
-                Visibility::new(self.to_item_id(field.def_id)),
+                self.to_visibility(field.def_id, field.vis_span),
                 self.to_symbol_id(field.ident.name),
                 self.to_syn_ty(field.ty),
                 self.to_span_id(field.span),
@@ -270,16 +299,21 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
     fn to_external_item(&self, rustc_item: &'tcx hir::ForeignItemRef, abi: Abi) -> ExternItemKind<'ast> {
         let id = self.to_item_id(rustc_item.id.owner_id);
         if let Some(item) = self.items.borrow().get(&id) {
+            #[expect(non_exhaustive_omitted_patterns)]
             return match item {
                 ItemKind::Static(data) => ExternItemKind::Static(data, CtorBlocker::new()),
                 ItemKind::Fn(data) => ExternItemKind::Fn(data, CtorBlocker::new()),
-                #[expect(non_exhaustive_omitted_patterns)]
                 _ => unreachable!("only static and `Static` and `Fn` items can be found a foreign item id"),
             };
         }
 
         let foreign_item = self.rustc_cx.hir().foreign_item(rustc_item.id);
-        let data = CommonItemData::new(id, self.to_span_id(rustc_item.span), self.to_ident(rustc_item.ident));
+        let data = CommonItemData::builder()
+            .id(id)
+            .span(self.to_span_id(rustc_item.span))
+            .vis(self.to_visibility(foreign_item.owner_id.def_id, foreign_item.vis_span))
+            .ident(self.to_ident(rustc_item.ident))
+            .build();
         let item = match &foreign_item.kind {
             hir::ForeignItemKind::Fn(decl, idents, generics) => {
                 let return_ty = if let hir::FnRetTy::Return(rust_ty) = decl.output {
@@ -329,17 +363,26 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
     fn to_assoc_item(&self, rustc_item: &hir::TraitItemRef) -> AssocItemKind<'ast> {
         let id = self.to_item_id(rustc_item.id.owner_id);
         if let Some(item) = self.items.borrow().get(&id) {
+            #[expect(non_exhaustive_omitted_patterns)]
             return match item {
                 ItemKind::TyAlias(item) => AssocItemKind::TyAlias(item, CtorBlocker::new()),
                 ItemKind::Const(item) => AssocItemKind::Const(item, CtorBlocker::new()),
                 ItemKind::Fn(item) => AssocItemKind::Fn(item, CtorBlocker::new()),
-                #[expect(non_exhaustive_omitted_patterns)]
                 _ => unreachable!("only static and `TyAlias`, `Const` and `Fn` items can be found as an assoc item"),
             };
         }
 
         let trait_item = self.rustc_cx.hir().trait_item(rustc_item.id);
-        let data = CommonItemData::new(id, self.to_span_id(rustc_item.span), self.to_ident(rustc_item.ident));
+        let data = CommonItemData::builder()
+            .id(id)
+            .span(self.to_span_id(rustc_item.span))
+            .vis(
+                Visibility::builder()
+                    .sem(sem::Visibility::builder().kind(sem::VisibilityKind::DefaultPub).build())
+                    .build(),
+            )
+            .ident(self.to_ident(rustc_item.ident))
+            .build();
 
         let item = match &trait_item.kind {
             hir::TraitItemKind::Const(ty, body_id) => AssocItemKind::Const(
@@ -378,17 +421,22 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
     fn to_assoc_item_from_impl(&self, rustc_item: &hir::ImplItemRef) -> AssocItemKind<'ast> {
         let id = self.to_item_id(rustc_item.id.owner_id);
         if let Some(item) = self.items.borrow().get(&id) {
+            #[expect(non_exhaustive_omitted_patterns)]
             return match item {
                 ItemKind::TyAlias(item) => AssocItemKind::TyAlias(item, CtorBlocker::new()),
                 ItemKind::Const(item) => AssocItemKind::Const(item, CtorBlocker::new()),
                 ItemKind::Fn(item) => AssocItemKind::Fn(item, CtorBlocker::new()),
-                #[expect(non_exhaustive_omitted_patterns)]
                 _ => unreachable!("only static and `TyAlias`, `Const` and `Fn` items can be found by an impl ref item"),
             };
         }
 
         let impl_item = self.rustc_cx.hir().impl_item(rustc_item.id);
-        let data = CommonItemData::new(id, self.to_span_id(rustc_item.span), self.to_ident(rustc_item.ident));
+        let data = CommonItemData::builder()
+            .id(id)
+            .span(self.to_span_id(rustc_item.span))
+            .vis(self.to_visibility(rustc_item.id.owner_id.def_id, impl_item.vis_span))
+            .ident(self.to_ident(rustc_item.ident))
+            .build();
 
         let item = match &impl_item.kind {
             hir::ImplItemKind::Const(ty, body_id) => AssocItemKind::Const(
@@ -431,17 +479,6 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
         let id = self.to_body_id(body.id());
         if let Some(&body) = self.bodies.borrow().get(&id) {
             return body;
-        }
-
-        // Yield expressions are currently unstable
-        if let Some(hir::GeneratorKind::Gen) = body.generator_kind {
-            return self.alloc(Body::new(
-                self.to_item_id(self.rustc_cx.hir().body_owner_def_id(body.id())),
-                ast::ExprKind::Unstable(self.alloc(ast::UnstableExpr::new(
-                    ast::CommonExprData::new(self.to_expr_id(body.value.hir_id), self.to_span_id(body.value.span)),
-                    ast::ExprPrecedence::Unstable(0),
-                ))),
-            ));
         }
 
         self.with_body(body.id(), || {

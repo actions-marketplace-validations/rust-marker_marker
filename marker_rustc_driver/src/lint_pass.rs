@@ -24,6 +24,7 @@ thread_local! {
 pub struct RustcLintPass;
 
 impl RustcLintPass {
+    #[allow(clippy::missing_errors_doc)]
     pub fn init_adapter(lint_crates: &[LintCrateInfo]) -> Result<(), marker_adapter::Error> {
         ADAPTER.with(move |cell| {
             cell.get_or_try_init(|| Adapter::new(lint_crates))?;
@@ -31,17 +32,9 @@ impl RustcLintPass {
         })
     }
 
+    #[must_use]
     pub fn marker_lints() -> Vec<&'static Lint> {
-        ADAPTER.with(|adapter| {
-            adapter
-                .get()
-                .unwrap()
-                .lint_pass_infos()
-                .iter()
-                .flat_map(marker_api::LintPassInfo::lints)
-                .copied()
-                .collect()
-        })
+        ADAPTER.with(|adapter| adapter.get().unwrap().marker_lints())
     }
 }
 
@@ -55,7 +48,7 @@ impl<'tcx> rustc_lint::LateLintPass<'tcx> for RustcLintPass {
     }
 }
 
-fn process_crate(rustc_cx: &rustc_lint::LateContext<'_>, adapter: &Adapter) {
+pub fn process_crate(rustc_cx: &rustc_lint::LateContext<'_>, adapter: &Adapter) {
     let storage = Storage::default();
     process_crate_lifetime(rustc_cx, &storage, adapter);
 }
@@ -67,16 +60,18 @@ fn process_crate_lifetime<'ast, 'tcx: 'ast>(
     storage: &'ast Storage<'ast>,
     adapter: &Adapter,
 ) {
-    let driver_cx = RustcContext::new(rustc_cx.tcx, rustc_cx.lint_store, storage);
+    let driver_cx = RustcContext::new(
+        rustc_cx.tcx,
+        rustc_lint::unerased_lint_store(rustc_cx.tcx.sess),
+        storage,
+    );
 
     // To support debug printing of AST nodes, as these might sometimes require the
     // context. Note that this only sets the cx for the rustc side. Each lint crate
     // has their own storage for cx.
     marker_api::context::set_ast_cx(driver_cx.ast_cx());
 
-    let krate = driver_cx
-        .marker_converter
-        .to_crate(rustc_hir::def_id::LOCAL_CRATE, driver_cx.rustc_cx.hir().root_module());
+    let krate = driver_cx.marker_converter.local_crate();
 
     adapter.process_krate(driver_cx.ast_cx(), krate);
 }

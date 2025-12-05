@@ -47,21 +47,21 @@ We provide pre-compiled binaries for the mainstream platforms. See the list of a
 
 Select one of the installation scripts below according to your platform. The script will install the required Rust toolchain dependency on your machine, download the current version of `cargo-marker` CLI, and the internal driver.
 
-<!-- region replace-version stable -->
+<!-- region replace marker version stable -->
 
 **Linux or MacOS (Bash)**:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rust-marker/marker/v0.3/scripts/release/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/rust-marker/marker/v0.5/scripts/release/install.sh | bash
 ```
 
 **Windows (PowerShell)**:
 ```ps1
-curl.exe -fsSL https://raw.githubusercontent.com/rust-marker/marker/v0.3/scripts/release/install.ps1 | powershell -command -
+curl.exe -fsSL https://raw.githubusercontent.com/rust-marker/marker/v0.5/scripts/release/install.ps1 | powershell -command -
 ```
 
-The provided scripts use a sliding git tag `v0.3`, to allow for automatic patch version updates, however a fixed tag `v0.3.0` is also available.
+The provided scripts use a sliding git tag `v0.5`, to allow for automatic patch version updates, however a fixed tag `v0.5.0` is also available.
 
-<!-- endregion replace-version stable -->
+<!-- endregion replace marker version stable -->
 
 If you are on a platform that isn't supported yet by the pre-compiled binaries, then you should fall back to building from sources as described below.
 
@@ -78,16 +78,16 @@ cargo marker setup --auto-install-toolchain
 
 Marker provides a Github Action that downloads the pre-compiled binaries and runs `cargo marker`.
 
-<!-- region replace-version stable -->
+<!-- region replace marker version stable -->
 
 ```yml
-- uses: rust-marker/marker@v0.3
+- uses: rust-marker/marker@v0.5
 ```
 
 If you want to only install Marker, and not run it, there is an option for that.
 
 ```yml
-- uses: rust-marker/marker@v0.3
+- uses: rust-marker/marker@v0.5
   with:
     install-only: true
 
@@ -97,13 +97,13 @@ If you want to only install Marker, and not run it, there is an option for that.
 
 See [The Marker Book] for more details and examples of workflows.
 
-<!-- endregion replace-version stable -->
+<!-- endregion replace marker version stable -->
 
 ### Specifying lints
 
 Marker requires lint crates to be specified. The best way is to add them to the `Cargo.toml` file, like this:
 
-<!-- region replace-version stable -->
+<!-- region replace marker version stable -->
 ```toml
 [workspace.metadata.marker.lints]
 # A local crate as a path
@@ -111,9 +111,9 @@ marker_lints = { path = './marker_lints' }
 # An external crate via git
 marker_lints = { git = "https://github.com/rust-marker/marker" }
 # An external crate from a registry
-marker_lints = "0.3.0"
+marker_lints = "0.5.0"
 ```
-<!-- endregion replace-version stable -->
+<!-- endregion replace marker version stable -->
 
 ### Making Your Own Lints
 
@@ -151,7 +151,6 @@ Marker is still growing up, and that's a good thing. We can still shape the API 
     * Higher order types
     * Attributes [#51](https://github.com/rust-marker/marker/issues/51)
     * Macros [rust-marker/design#47](https://github.com/rust-marker/design/issues/47)
-    * Item visibility [#26](https://github.com/rust-marker/marker/issues/26)
 * **Utility**: The API is currently lacking a lot of utility functions, to handle edge cases and make linting more pleasant.
 * **Documentation**: Marker still requires a lot of documentation, in the form of doc comments and a book, which explains the basic concept and works as a guide for end-users, lint- and marker-devs alike.
 

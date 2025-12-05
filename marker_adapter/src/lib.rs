@@ -12,6 +12,7 @@ pub use error::{Error, Result};
 pub use loader::LintCrateInfo;
 
 use loader::LintCrateRegistry;
+use marker_api::Lint;
 use marker_api::{
     ast::{Body, Crate, EnumVariant, ExprKind, ItemField, ItemKind, StmtKind},
     context::MarkerContext,
@@ -54,19 +55,26 @@ impl Adapter {
         })
     }
 
+    pub fn marker_lints(&self) -> Vec<&'static Lint> {
+        self.lint_pass_infos()
+            .iter()
+            .flat_map(marker_api::LintPassInfo::lints)
+            .copied()
+            .collect()
+    }
+
     #[must_use]
-    pub fn lint_pass_infos(&self) -> Vec<LintPassInfo> {
+    fn lint_pass_infos(&self) -> Vec<LintPassInfo> {
         self.inner.borrow().external_lint_crates.collect_lint_pass_info()
     }
 
-    pub fn process_krate<'ast>(&self, cx: &'ast MarkerContext<'ast>, krate: &Crate<'ast>) {
+    pub fn process_krate<'ast>(&self, cx: &'ast MarkerContext<'ast>, krate: &'ast Crate<'ast>) {
         let inner = &mut *self.inner.borrow_mut();
 
         inner.external_lint_crates.set_ast_context(cx);
 
-        for item in krate.items() {
-            visitor::traverse_item::<()>(cx, inner, *item);
-        }
+        inner.external_lint_crates.check_crate(cx, krate);
+        visitor::traverse_item::<()>(cx, inner, ItemKind::Mod(krate.root_mod()));
     }
 }
 

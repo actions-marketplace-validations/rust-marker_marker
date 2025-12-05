@@ -8,13 +8,14 @@ mod common;
 mod sem;
 mod span;
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 
 use crate::context::storage::Storage;
 use marker_api::{
-    ast::{Body, Crate, EnumVariant, ItemField},
+    ast::{Body, CommonItemData, Crate, EnumVariant, ItemField, ModItem, Visibility as AstVisibility},
     common::{Level, SymbolId},
     prelude::*,
+    sem::{Visibility as SemVisibility, VisibilityKind},
     span::{ExpnInfo, FilePos, Span, SpanSource},
 };
 use rustc_hash::FxHashMap;
@@ -95,7 +96,7 @@ impl<'ast, 'tcx> MarkerConverter<'ast, 'tcx> {
         }
 
         self.with_body(hir_id, |inner| {
-            let Some(hir::Node::Stmt(stmt)) = inner.rustc_cx.hir().find(hir_id) else {
+            let Some(hir::Node::Stmt(stmt)) = inner.rustc_cx.opt_hir_node(hir_id) else {
                 return None;
             };
             inner.to_stmt(stmt)
@@ -110,7 +111,7 @@ impl<'ast, 'tcx> MarkerConverter<'ast, 'tcx> {
         }
 
         self.with_body(hir_id, |inner| {
-            let Some(hir::Node::Expr(expr)) = inner.rustc_cx.hir().find(hir_id) else {
+            let Some(hir::Node::Expr(expr)) = inner.rustc_cx.opt_hir_node(hir_id) else {
                 return None;
             };
             Some(inner.to_expr(expr))
@@ -145,10 +146,8 @@ impl<'ast, 'tcx> MarkerConverter<'ast, 'tcx> {
         scx: rustc_span::SyntaxContext,
         pos: rustc_span::BytePos,
     ) -> Option<FilePos<'ast>>);
-    forward_to_inner!(pub fn to_crate(
+    forward_to_inner!(pub fn local_crate(
         &self,
-        rustc_crate_id: hir::def_id::CrateNum,
-        rustc_root_mod: &'tcx hir::Mod<'tcx>,
     ) -> &'ast Crate<'ast>);
 }
 
@@ -166,6 +165,7 @@ struct MarkerConverterInner<'ast, 'tcx> {
     storage: &'ast Storage<'ast>,
 
     // Converted nodes cache
+    krate: OnceCell<&'ast Crate<'ast>>,
     items: RefCell<FxHashMap<ItemId, ItemKind<'ast>>>,
     bodies: RefCell<FxHashMap<BodyId, &'ast Body<'ast>>>,
     exprs: RefCell<FxHashMap<ExprId, ExprKind<'ast>>>,
@@ -173,6 +173,8 @@ struct MarkerConverterInner<'ast, 'tcx> {
     fields: RefCell<FxHashMap<FieldId, &'ast ItemField<'ast>>>,
     variants: RefCell<FxHashMap<VariantId, &'ast EnumVariant<'ast>>>,
 
+    // Cached/Dummy values
+    builtin_span_source: &'ast marker_api::span::BuiltinInfo<'ast>,
     num_symbols: RefCell<FxHashMap<u32, SymbolId>>,
 
     /// Lang-items are weird, and if I'm being honest, I'm uncertain that I
@@ -218,12 +220,14 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
         let s = Self {
             rustc_cx,
             storage,
+            krate: OnceCell::default(),
             items: RefCell::default(),
             bodies: RefCell::default(),
             exprs: RefCell::default(),
             stmts: RefCell::default(),
             fields: RefCell::default(),
             variants: RefCell::default(),
+            builtin_span_source: storage.alloc(marker_api::span::BuiltinInfo::default()),
             num_symbols: RefCell::default(),
             lang_item_map: RefCell::default(),
             rustc_body: RefCell::default(),
@@ -304,14 +308,42 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
 
 impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
     #[must_use]
-    fn to_crate(
-        &self,
-        rustc_crate_id: hir::def_id::CrateNum,
-        rustc_root_mod: &'tcx hir::Mod<'tcx>,
-    ) -> &'ast Crate<'ast> {
-        self.alloc(Crate::new(
-            self.to_crate_id(rustc_crate_id),
-            self.to_items(rustc_root_mod.item_ids),
-        ))
+    fn local_crate(&self) -> &'ast Crate<'ast> {
+        self.krate.get_or_init(|| {
+            let krate = self.alloc(
+                Crate::builder()
+                    .id(self.to_crate_id(hir::def_id::LOCAL_CRATE))
+                    .root_mod(self.local_crate_mod())
+                    .build(),
+            );
+
+            let root_mod = krate.root_mod();
+            self.items.borrow_mut().insert(root_mod.id(), ItemKind::Mod(root_mod));
+            krate
+        })
+    }
+
+    fn local_crate_mod(&self) -> ModItem<'ast> {
+        let id = self.to_item_id(hir::def_id::DefId::from(hir::CRATE_OWNER_ID));
+        let krate_mod = self.rustc_cx.hir().root_module();
+        let ident = Ident::new(
+            self.to_symbol_id(self.rustc_cx.crate_name(hir::def_id::LOCAL_CRATE)),
+            self.to_span_id(rustc_span::DUMMY_SP),
+        );
+        let data = CommonItemData::builder()
+            .id(id)
+            .span(self.to_span_id(krate_mod.spans.inner_span))
+            .vis(
+                AstVisibility::builder()
+                    .span(None)
+                    .sem(SemVisibility::builder().kind(VisibilityKind::DefaultPub).build())
+                    .build(),
+            )
+            .ident(ident)
+            .build();
+        ModItem::builder()
+            .data(data)
+            .items(self.to_items(krate_mod.item_ids))
+            .build()
     }
 }

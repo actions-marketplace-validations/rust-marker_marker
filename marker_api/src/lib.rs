@@ -6,14 +6,20 @@
 #![allow(clippy::unused_self)] // `self` is needed to change the behavior later
 #![allow(clippy::missing_panics_doc)] // Temporary allow for `todo!`s
 #![allow(clippy::new_without_default)] // Not very helpful as `new` is almost always cfged
+#![allow(clippy::no_effect_underscore_binding)] // FP with derive macros clippy#12045
 #![cfg_attr(not(feature = "driver-api"), allow(dead_code))]
+#![cfg_attr(marker, warn(marker::marker_lints::not_using_has_span_trait))]
 
 pub static MARKER_API_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 mod interface;
+mod private;
 pub use interface::*;
 mod lint;
 pub use lint::*;
+
+#[cfg(test)]
+pub(crate) mod test;
 
 pub mod ast;
 pub mod common;
@@ -36,22 +42,13 @@ pub use interface::{LintPassInfo, LintPassInfoBuilder};
 pub trait LintPass {
     fn info(&self) -> LintPassInfo;
 
+    fn check_crate<'ast>(&mut self, _cx: &'ast MarkerContext<'ast>, _krate: &'ast ast::Crate<'ast>) {}
     fn check_item<'ast>(&mut self, _cx: &'ast MarkerContext<'ast>, _item: ast::ItemKind<'ast>) {}
     fn check_field<'ast>(&mut self, _cx: &'ast MarkerContext<'ast>, _field: &'ast ast::ItemField<'ast>) {}
     fn check_variant<'ast>(&mut self, _cx: &'ast MarkerContext<'ast>, _variant: &'ast ast::EnumVariant<'ast>) {}
     fn check_body<'ast>(&mut self, _cx: &'ast MarkerContext<'ast>, _body: &'ast ast::Body<'ast>) {}
     fn check_stmt<'ast>(&mut self, _cx: &'ast MarkerContext<'ast>, _stmt: ast::StmtKind<'ast>) {}
     fn check_expr<'ast>(&mut self, _cx: &'ast MarkerContext<'ast>, _expr: ast::ExprKind<'ast>) {}
-}
-
-pub(crate) mod private {
-    /// A private super trait, to prevent other creates from implementing Marker's
-    /// API traits.
-    ///
-    /// See: [Sealed traits](https://rust-lang.github.io/api-guidelines/future-proofing.html)
-    pub trait Sealed {}
-
-    impl<N: Sealed> Sealed for &N {}
 }
 
 /// This struct blocks the construction of enum variants, similar to the `#[non_exhaustive]`

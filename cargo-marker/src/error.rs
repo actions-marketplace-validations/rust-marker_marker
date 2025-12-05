@@ -50,7 +50,7 @@ or:
     BuildDriver,
 }
 
-// region replace-version stable
+// region replace marker version stable
 fn help_for_no_lints() -> String {
     format!(
         r#"The are two ways to specify lints.
@@ -70,13 +70,13 @@ marker_lints = { path = './marker_lints' }
 # An external crate via git
 marker_lints = { git = "https://github.com/rust-marker/marker" }
 # An external crate from a registry
-marker_lints = "0.3.0""#
+marker_lints = "0.5.0""#
         ),
-        cli_example = display::cli(r#"cargo marker --lints "marker_lints = '0.3.0'""#),
+        cli_example = display::cli(r#"cargo marker --lints "marker_lints = '0.5.0'""#),
         lints = "--lints".blue(),
     )
 }
-// endregion replace-version stable
+// endregion replace marker version stable
 
 fn help_for_driver_not_found() -> String {
     format!(

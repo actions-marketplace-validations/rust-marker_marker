@@ -30,15 +30,16 @@ use crate::common::{Level, MacroReport};
 #[repr(C)]
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Lint {
-    /// A string identifier for the lint.
+    /// The string identifier of this lint.
     ///
-    /// This identifies the lint in attributes and in command-line arguments.
-    /// In those contexts it is always lowercase. This allows
-    /// [`declare_lint`](crate::declare_lint) macro invocations to follow the
-    /// convention of upper-case statics without repeating the name.
+    /// Identifiers use underscores, to connect multiple words, e.g., "unused_imports".
+    /// Lint names in console arguments use dashes instead of underscores. These are
+    /// automatically converted to underscores internally.
     ///
-    /// The name is written with underscores, e.g., "unused_imports".
-    /// On the command line, underscores become dashes.
+    /// Identifiers in Marker are split into three parts:
+    /// 1. The `marker` prefix, specifying that the lint comes from Marker
+    /// 2. The lint crate name, as an infix
+    /// 3. The name of the lint, as the postfix
     ///
     /// See <https://rustc-dev-guide.rust-lang.org/diagnostics.html#lint-naming>
     /// for naming guidelines.
@@ -59,6 +60,10 @@ pub struct Lint {
     ///
     /// See [`MacroReport`] for the possible levels.
     pub report_in_macro: MacroReport,
+
+    /// Fully qualiefied name of the static variable that defines the lint.
+    /// It includes the module and the name of the variable.
+    pub fqn: &'static str,
 
     /// This struct should always be instantiated using the [`declare_lint`](crate::declare_lint)
     /// macro. This value is simply here, to force any construction to acknowledge the
@@ -114,10 +119,27 @@ macro_rules! declare_lint {
     ) => {
         $(#[doc = $doc])+
         pub static $NAME: &$crate::Lint = &$crate::Lint {
-            name: concat!("marker::", stringify!($NAME)),
+            // The `CARGO_CRATE_NAME` environment value is set by Cargo during compilation.
+            // The name has already been normalized to use underscores, instead of dashes,
+            // which is ideal for Marker.
+            //
+            // The name is taken from the `Cargo.toml` file of the lint crate, even if the
+            // dependency has been renamed. This is fine for now, since Marker doesn't expose
+            // any interface for the users to rename the lint crates. We might need to add our
+            // own environment value later, if we want to support lint crate renaming.
+            //
+            // Example, how the package could be renamed in the `Cargo.toml` of Marker's dummy
+            // crate for lint crate fetching:
+            // ```toml
+            // [dependencies]
+            // ducks = { version = "0.3", package = "marker_lints" }
+            // ```
+            // The environment value would still have the value `marker_lints`
+            name: concat!("marker::", std::env!("CARGO_CRATE_NAME"), "::", stringify!($NAME)),
             default_level: $crate::common::Level::$LEVEL,
             explanation: concat!($($doc, '\n',)*),
             report_in_macro: $REPORT_IN_MACRO,
+            fqn: concat!(module_path!(), "::", stringify!($NAME)),
             _unstable_i_accept_the_risk_of_instability: (),
         };
     };

@@ -1,4 +1,9 @@
-[Unreleased]: https://github.com/rust-marker/marker/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/rust-marker/marker/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/rust-marker/marker/releases/tag/v0.4.3
+[0.4.3]: https://github.com/rust-marker/marker/releases/tag/v0.4.3
+[0.4.2]: https://github.com/rust-marker/marker/releases/tag/v0.4.2
+[0.4.1]: https://github.com/rust-marker/marker/releases/tag/v0.4.1
+[0.4.0]: https://github.com/rust-marker/marker/releases/tag/v0.4.0
 [0.3.0]: https://github.com/rust-marker/marker/releases/tag/v0.3.0
 [0.2.1]: https://github.com/rust-marker/marker/releases/tag/v0.2.1
 [0.1.1]: https://github.com/rust-marker/marker/releases/tag/v0.1.1
@@ -23,9 +28,79 @@ The following components are considered to be internal and they are excluded fro
 
 ## [Unreleased]
 
-The [v0.4.0 milestone] contains a list of planned changes.
+[#345]: https://github.com/rust-marker/marker/pull/345
+
+### Internal
+
+- [#345]: Bumped the used nightly toolchain version to 2023-12-28
+
+## [0.5.0] - 2023-12-28
+
+[#322]: https://github.com/rust-marker/marker/pull/322
+[#342]: https://github.com/rust-marker/marker/pull/342
+
+### Added
+
+- [#322]: `sem::TyKind` now implements `From<*>` for all semantic types.
+
+### Breaking Changes
+
+- [#322]: Renamed `sem::TyKind::FnTy` -> `sem::TyKind::Fn`
+- [#322]: Renamed `sem::TyKind::ClosureTy` -> `sem::TyKind::Closure`
+- [#322]: Renamed `sem::ClosureTy::closure_ty_id` -> `sem::ClosureTy::def_id`
+- [#342]: Increased minimal rust version to build `cargo_marker` to 1.70
+
+## [0.4.3] - 2023-12-02
+
+[#326]: https://github.com/rust-marker/marker/pull/326
+
+### Fixed
+
+- [#326]: Use rustc's default way of discovering the system root directory, unless `MARKER_SYSROOT` is specified
+
+## [0.4.2] - 2023-11-25
+
+[#320]: https://github.com/rust-marker/marker/pull/320
+
+### Fixed
+
+- [#320]: Disable LTO on release builds to fix the crash on Windows with `exit code: 0xc0000005, STATUS_ACCESS_VIOLATION`
+
+## [0.4.1] - 2023-11-24
+
+[#319]: https://github.com/rust-marker/marker/pull/319
+
+### Fixed
+
+- [#319]: Fix compiling driver from sources outside of the marker repo on Windows
+
+## [0.4.0] - 2023-11-16
+
+The [v0.4.0 milestone] contains a full list of all changes.
 
 [v0.4.0 milestone]: https://github.com/rust-marker/marker/milestone/4
+[#278]: https://github.com/rust-marker/marker/pull/278
+[#288]: https://github.com/rust-marker/marker/pull/288
+[#294]: https://github.com/rust-marker/marker/pull/294
+[#306]: https://github.com/rust-marker/marker/pull/306
+[#309]: https://github.com/rust-marker/marker/pull/309
+
+### Added
+- [#306]: The `LintPass` trait now as a new `check_crate` method.
+- [#294]: Items and fields now provide information about their visibility
+
+### Fixed
+- [#306]: Rustc's driver no longer ICEs on spans from compiler generated code.
+
+### Breaking Changes
+- [#278]: Moved the `span()` method from the inherent impl to `HasSpan` trait for `ClosureParam`, `FnParam`, `StructFieldPat`.
+- [#278]: The trait `TyData` no longer has own `span()` method, but instead requires `HasSpan` as a supertrait.
+- [#278]: All public methods that took `&Span` as a parameter now take `impl HasSpan`. This is a minor breaking change, as `&Span` implements `HasSpan`, but if you relied on type inference based on the function parameter type, then making a method generic may break your code.
+- [#288]: Lint identifiers use the lint crate name as a new infix, to prevent name collisions across lint crates.
+- [#306]: The items of a `Crate` are now wrapped in a `ModItem`, that is the root module of the crate.
+- [#309]: Renamed `CallExpr::operand` to `CallExpr::func`
+- [#309]: Renamed `RefPat::pattern()` -> `RefPat::pat()`
+- [#309]: Renamed `OrPat::patterns()` -> `RefPat::pats()`
 
 ## [0.3.0] - 2023-10-05
 

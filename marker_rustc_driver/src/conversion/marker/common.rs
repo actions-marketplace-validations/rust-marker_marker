@@ -6,6 +6,7 @@ use marker_api::{
     span::Ident,
 };
 use rustc_hir as hir;
+use rustc_middle as mid;
 
 use crate::conversion::common::{BodyIdLayout, DefIdLayout, ExpnIdLayout, HirIdLayout};
 use crate::transmute_id;
@@ -162,6 +163,16 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
         // transmute and expect the type to always be 32 bits long.
         transmute_id!(rustc_span::SyntaxContext as SpanSrcId = id)
     }
+
+    #[must_use]
+    pub fn to_driver_ty_id(&self, ty: mid::ty::Ty<'tcx>) -> DriverTyId {
+        // FIXME(xFrednet): This is another theoretically unsafe conversion, since
+        // `mid::ty::Ty` doesn't have `#[repr(..)]`. However, it should be fine, as
+        // long as we only access it in the driver, which has the same ABI for all
+        // types. This specific one, is even a wrapper around rustc's `Interned` typed
+        // which should remain valid for `'tcx` and continue to have a small memory footprint.
+        transmute_id!(mid::ty::Ty as DriverTyId = ty)
+    }
 }
 
 // Other magical cool things
@@ -206,7 +217,7 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
 
     pub fn to_syncness(&self, syncness: hir::IsAsync) -> Syncness {
         match syncness {
-            hir::IsAsync::Async => Syncness::Async,
+            hir::IsAsync::Async(_) => Syncness::Async,
             hir::IsAsync::NotAsync => Syncness::Sync,
         }
     }
@@ -271,7 +282,7 @@ impl<'ast, 'tcx> MarkerConverterInner<'ast, 'tcx> {
                 AstQPath::new(None, Some(marker_ty), path, res)
             },
             // I recommend reading the comment of `Self::lang_item_map` for context
-            hir::QPath::LangItem(item, span, _) => {
+            hir::QPath::LangItem(item, span) => {
                 let id = self
                     .rustc_cx
                     .lang_items()
